@@ -5,6 +5,7 @@ public final class GoogleTTSClient: AbstractTTSClient, @unchecked Sendable {
     private let player = AudioPlayer()
     private var voice = "en-US-Wavenet-D"
     private var audioEncoding = "MP3"
+    private var cachedBoundaries: [WordBoundary] = []
 
     public override init(credentials: TTSCredentials = [:]) {
         super.init(credentials: credentials)
@@ -32,13 +33,83 @@ public final class GoogleTTSClient: AbstractTTSClient, @unchecked Sendable {
         }
     }
 
+    internal func addWordTimingMarks(to text: String) -> (ssml: String, words: [String]) {
+        var cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleanText.hasPrefix("<speak>") {
+            cleanText = String(cleanText.dropFirst("<speak>".count))
+        }
+        if cleanText.hasSuffix("</speak>") {
+            cleanText = String(cleanText.dropLast("</speak>".count))
+        }
+        
+        var textWithoutTags = ""
+        var inTag = false
+        for char in cleanText {
+            if char == "<" {
+                inTag = true
+            } else if char == ">" {
+                inTag = false
+            } else if !inTag {
+                textWithoutTags.append(char)
+            }
+        }
+        
+        let words = textWithoutTags.split { $0.isWhitespace }.map(String.init).filter { !$0.isEmpty }
+        var ssml = "<speak>"
+        for (index, word) in words.enumerated() {
+            if index > 0 {
+                ssml += " "
+            }
+            ssml += "<mark name=\"\(index)\"/>\(word)"
+        }
+        ssml += "</speak>"
+        return (ssml, words)
+    }
+
+    internal func parseTimepoints(_ timepointsList: [[String: Any]], words: [String]) -> [WordBoundary] {
+        struct RawTimepoint {
+            let index: Int
+            let timeMs: Int
+        }
+        
+        var rawTimepoints: [RawTimepoint] = []
+        for tp in timepointsList {
+            guard let markName = tp["markName"] as? String,
+                  let index = Int(markName),
+                  index >= 0 && index < words.count,
+                  let timeSeconds = tp["timeSeconds"] as? Double else {
+                continue
+            }
+            rawTimepoints.append(RawTimepoint(index: index, timeMs: Int(timeSeconds * 1000)))
+        }
+        
+        rawTimepoints.sort { $0.timeMs < $1.timeMs }
+        
+        var boundaries: [WordBoundary] = []
+        for i in 0..<rawTimepoints.count {
+            let tp = rawTimepoints[i]
+            let word = words[tp.index]
+            let duration: Int
+            if i < rawTimepoints.count - 1 {
+                duration = rawTimepoints[i+1].timeMs - tp.timeMs
+            } else {
+                duration = max(50, word.count * 80)
+            }
+            boundaries.append(WordBoundary(text: word, offset: tp.timeMs, duration: duration))
+        }
+        
+        return boundaries
+    }
+
     public override func synthToBytes(_ text: String, options: SpeakOptions?) async throws -> Data {
         let key = credentials["apiKey"] ?? ProcessInfo.processInfo.environment["GOOGLE_TTS_KEY"]
         guard let apiKey = key, !apiKey.isEmpty else {
             throw NSError(domain: "GoogleTTSClient", code: 401, userInfo: [NSLocalizedDescriptionKey: "Missing Google Cloud API Key"])
         }
 
-        let urlString = "https://texttospeech.googleapis.com/v1/text:synthesize?key=\(apiKey)"
+        let useWordBoundary = options?.useWordBoundary == true
+        let apiVersion = useWordBoundary ? "v1beta1" : "v1"
+        let urlString = "https://texttospeech.googleapis.com/\(apiVersion)/text:synthesize?key=\(apiKey)"
         guard let url = URL(string: urlString) else {
             throw NSError(domain: "GoogleTTSClient", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid Google Cloud TTS URL"])
         }
@@ -52,13 +123,19 @@ public final class GoogleTTSClient: AbstractTTSClient, @unchecked Sendable {
         let selectedEncoding = options?.format?.rawValue.uppercased() ?? audioEncoding
 
         var inputPayload: [String: Any] = [:]
-        if options?.rawSSML == true || text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<speak>") {
+        var wordsList: [String] = []
+
+        if useWordBoundary {
+            let (markedSSML, words) = addWordTimingMarks(to: text)
+            inputPayload["ssml"] = markedSSML
+            wordsList = words
+        } else if options?.rawSSML == true || text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<speak>") {
             inputPayload["ssml"] = text
         } else {
             inputPayload["text"] = text
         }
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "input": inputPayload,
             "voice": [
                 "languageCode": selectedLang,
@@ -68,6 +145,10 @@ public final class GoogleTTSClient: AbstractTTSClient, @unchecked Sendable {
                 "audioEncoding": selectedEncoding
             ]
         ]
+
+        if useWordBoundary {
+            body["enableTimePointing"] = ["SSML_MARK"]
+        }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -83,6 +164,16 @@ public final class GoogleTTSClient: AbstractTTSClient, @unchecked Sendable {
             throw NSError(domain: "GoogleTTSClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to parse Google audioContent"])
         }
 
+        if useWordBoundary {
+            if let timepointsList = json["timepoints"] as? [[String: Any]] {
+                self.cachedBoundaries = parseTimepoints(timepointsList, words: wordsList)
+            } else {
+                self.cachedBoundaries = WordTimingEstimator.estimate(text: text)
+            }
+        } else {
+            self.cachedBoundaries = []
+        }
+
         return audioData
     }
 
@@ -92,7 +183,12 @@ public final class GoogleTTSClient: AbstractTTSClient, @unchecked Sendable {
         switch input {
         case .text(let text):
             let data = try await synthToBytes(text, options: options)
-            let boundaries = options?.useWordBoundary == true ? WordTimingEstimator.estimate(text: text) : []
+            let boundaries: [WordBoundary]
+            if options?.useWordBoundary == true {
+                boundaries = cachedBoundaries.isEmpty ? WordTimingEstimator.estimate(text: text) : cachedBoundaries
+            } else {
+                boundaries = []
+            }
             try player.play(data: data, boundaries: boundaries)
 
         case .file(let url):

@@ -23,6 +23,8 @@ public final class PollyTTSClient: AbstractTTSClient, @unchecked Sendable {
         ])
     ]
 
+    private var cachedBoundaries: [WordBoundary] = []
+
     public override init(credentials: TTSCredentials = [:]) {
         super.init(credentials: credentials)
         if let customRegion = credentials["region"] {
@@ -55,16 +57,13 @@ public final class PollyTTSClient: AbstractTTSClient, @unchecked Sendable {
         }
     }
 
-    public override func synthToBytes(_ text: String, options: SpeakOptions?) async throws -> Data {
-        let accessKeyId = credentials["accessKeyId"] ?? ProcessInfo.processInfo.environment["AWS_ACCESS_KEY_ID"]
-        let secretAccessKey = credentials["secretAccessKey"] ?? ProcessInfo.processInfo.environment["AWS_SECRET_ACCESS_KEY"]
-        
-        guard let keyId = accessKeyId, !keyId.isEmpty,
-              let secretKey = secretAccessKey, !secretKey.isEmpty else {
-            throw NSError(domain: "PollyTTSClient", code: 401, userInfo: [NSLocalizedDescriptionKey: "Missing AWS credentials"])
-        }
-
-        let pollyRegion = credentials["region"] ?? region
+    private func fetchAudioData(
+        _ text: String,
+        options: SpeakOptions?,
+        keyId: String,
+        secretKey: String,
+        pollyRegion: String
+    ) async throws -> Data {
         guard let url = URL(string: "https://polly.\(pollyRegion).amazonaws.com/v1/speech") else {
             throw NSError(domain: "PollyTTSClient", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])
         }
@@ -119,7 +118,129 @@ public final class PollyTTSClient: AbstractTTSClient, @unchecked Sendable {
         return data
     }
 
+    private func fetchSpeechMarks(
+        _ text: String,
+        options: SpeakOptions?,
+        keyId: String,
+        secretKey: String,
+        pollyRegion: String
+    ) async throws -> [WordBoundary] {
+        guard let url = URL(string: "https://polly.\(pollyRegion).amazonaws.com/v1/speech") else {
+            return []
+        }
+
+        let selectedVoice = options?.voice ?? voice
+        let selectedEngine = options?.extraOptions?["engine"] as? String ?? engine
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        let isSSML = text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<speak>")
+        let textType = isSSML ? "ssml" : "text"
+
+        let body: [String: Any] = [
+            "OutputFormat": "json",
+            "SpeechMarkTypes": ["word"],
+            "Text": text,
+            "TextType": textType,
+            "VoiceId": selectedVoice,
+            "Engine": selectedEngine
+        ]
+
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        request.httpBody = bodyData
+
+        AWSSigV4Signer.sign(
+            request: &request,
+            body: bodyData,
+            region: pollyRegion,
+            accessKeyId: keyId,
+            secretAccessKey: secretKey
+        )
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
+            return []
+        }
+
+        guard let responseString = String(data: data, encoding: .utf8) else {
+            return []
+        }
+
+        return parseSpeechMarks(responseString)
+    }
+
+    internal func parseSpeechMarks(_ ndjson: String) -> [WordBoundary] {
+        struct SpeechMark: Codable {
+            let time: Int
+            let type: String
+            let start: Int
+            let end: Int
+            let value: String
+        }
+
+        let lines = ndjson.components(separatedBy: .newlines)
+        var marks: [SpeechMark] = []
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { continue }
+            if let lineData = trimmed.data(using: .utf8),
+               let mark = try? JSONDecoder().decode(SpeechMark.self, from: lineData) {
+                if mark.type == "word" {
+                    marks.append(mark)
+                }
+            }
+        }
+
+        var boundaries: [WordBoundary] = []
+        for i in 0..<marks.count {
+            let mark = marks[i]
+            let duration: Int
+            if i < marks.count - 1 {
+                duration = marks[i+1].time - mark.time
+            } else {
+                duration = max(50, mark.value.count * 80)
+            }
+            boundaries.append(WordBoundary(text: mark.value, offset: mark.time, duration: duration))
+        }
+
+        return boundaries
+    }
+
+    public override func synthToBytes(_ text: String, options: SpeakOptions?) async throws -> Data {
+        let accessKeyId = credentials["accessKeyId"] ?? ProcessInfo.processInfo.environment["AWS_ACCESS_KEY_ID"]
+        let secretAccessKey = credentials["secretAccessKey"] ?? ProcessInfo.processInfo.environment["AWS_SECRET_ACCESS_KEY"]
+        
+        guard let keyId = accessKeyId, !keyId.isEmpty,
+              let secretKey = secretAccessKey, !secretKey.isEmpty else {
+            throw NSError(domain: "PollyTTSClient", code: 401, userInfo: [NSLocalizedDescriptionKey: "Missing AWS credentials"])
+        }
+
+        let pollyRegion = credentials["region"] ?? region
+        let useWordBoundary = options?.useWordBoundary == true
+
+        if useWordBoundary {
+            async let audioTask = fetchAudioData(text, options: options, keyId: keyId, secretKey: secretKey, pollyRegion: pollyRegion)
+            async let marksTask = fetchSpeechMarks(text, options: options, keyId: keyId, secretKey: secretKey, pollyRegion: pollyRegion)
+            let (audioData, boundaries) = try await (audioTask, marksTask)
+            self.cachedBoundaries = boundaries
+            return audioData
+        } else {
+            self.cachedBoundaries = []
+            return try await fetchAudioData(text, options: options, keyId: keyId, secretKey: secretKey, pollyRegion: pollyRegion)
+        }
+    }
+
     public override func synthToBytestream(_ text: String, options: SpeakOptions?) async throws -> AsyncThrowingStream<Data, Error> {
+        let useWordBoundary = options?.useWordBoundary == true
+        if useWordBoundary {
+            let data = try await synthToBytes(text, options: options)
+            return AsyncThrowingStream { continuation in
+                continuation.yield(data)
+                continuation.finish()
+            }
+        }
+
         let accessKeyId = credentials["accessKeyId"] ?? ProcessInfo.processInfo.environment["AWS_ACCESS_KEY_ID"]
         let secretAccessKey = credentials["secretAccessKey"] ?? ProcessInfo.processInfo.environment["AWS_SECRET_ACCESS_KEY"]
         
@@ -210,7 +331,7 @@ public final class PollyTTSClient: AbstractTTSClient, @unchecked Sendable {
         switch input {
         case .text(let text):
             let data = try await synthToBytes(text, options: options)
-            let boundaries = options?.useWordBoundary == true ? WordTimingEstimator.estimate(text: text) : []
+            let boundaries = options?.useWordBoundary == true ? cachedBoundaries : []
             try player.play(data: data, boundaries: boundaries)
 
         case .file(let url):

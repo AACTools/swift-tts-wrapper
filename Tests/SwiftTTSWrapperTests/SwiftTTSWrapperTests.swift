@@ -297,4 +297,55 @@ final class SwiftTTSWrapperTests: XCTestCase {
         let voices = try await client.getVoices()
         XCTAssertFalse(voices.isEmpty)
     }
+
+    func testPollySpeechMarkParsing() {
+        let polly = TTSClientFactory.create(engine: .polly) as! PollyTTSClient
+        let ndjson = """
+        {"time": 0, "type": "word", "start": 0, "end": 5, "value": "Hello"}
+        {"time": 400, "type": "word", "start": 6, "end": 11, "value": "world"}
+        """
+        let boundaries = polly.parseSpeechMarks(ndjson)
+        
+        XCTAssertEqual(boundaries.count, 2)
+        XCTAssertEqual(boundaries[0].text, "Hello")
+        XCTAssertEqual(boundaries[0].offset, 0)
+        XCTAssertEqual(boundaries[0].duration, 400)
+        
+        XCTAssertEqual(boundaries[1].text, "world")
+        XCTAssertEqual(boundaries[1].offset, 400)
+        XCTAssertGreaterThan(boundaries[1].duration, 0)
+    }
+
+    func testGoogleSSMLAndTimepoints() {
+        let google = TTSClientFactory.create(engine: .google) as! GoogleTTSClient
+        
+        // Test SSML marked generation
+        let text = "Hello world"
+        let (ssml, words) = google.addWordTimingMarks(to: text)
+        XCTAssertEqual(ssml, "<speak><mark name=\"0\"/>Hello <mark name=\"1\"/>world</speak>")
+        XCTAssertEqual(words, ["Hello", "world"])
+        
+        // Test tag stripping in helper
+        let ssmlInput = "<speak>Hello world</speak>"
+        let (ssmlFromSSML, wordsFromSSML) = google.addWordTimingMarks(to: ssmlInput)
+        XCTAssertEqual(ssmlFromSSML, "<speak><mark name=\"0\"/>Hello <mark name=\"1\"/>world</speak>")
+        XCTAssertEqual(wordsFromSSML, ["Hello", "world"])
+        
+        // Test parsing timepoints
+        let timepointsList: [[String: Any]] = [
+            ["markName": "0", "timeSeconds": 0.125],
+            ["markName": "1", "timeSeconds": 0.450]
+        ]
+        let boundaries = google.parseTimepoints(timepointsList, words: words)
+        
+        XCTAssertEqual(boundaries.count, 2)
+        XCTAssertEqual(boundaries[0].text, "Hello")
+        XCTAssertEqual(boundaries[0].offset, 125)
+        XCTAssertEqual(boundaries[0].duration, 325) // 450 - 125
+        
+        XCTAssertEqual(boundaries[1].text, "world")
+        XCTAssertEqual(boundaries[1].offset, 450)
+        XCTAssertGreaterThan(boundaries[1].duration, 0)
+    }
 }
+
