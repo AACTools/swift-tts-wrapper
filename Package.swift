@@ -16,7 +16,7 @@ let package = Package(
             targets: ["SwiftTTSWrapperSherpaOnnx"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/willwade/sherpa-onnx-spm.git", from: "1.13.3"),
+        .package(url: "https://github.com/willwade/sherpa-onnx-spm.git", "1.13.2"..<"1.14.0"),
     ],
     targets: [
         .target(
