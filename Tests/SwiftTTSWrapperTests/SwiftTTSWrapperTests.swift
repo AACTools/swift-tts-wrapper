@@ -347,5 +347,59 @@ final class SwiftTTSWrapperTests: XCTestCase {
         XCTAssertEqual(boundaries[1].offset, 450)
         XCTAssertGreaterThan(boundaries[1].duration, 0)
     }
+
+    func testElevenLabsAlignmentParsing() {
+        let eleven = TTSClientFactory.create(engine: .elevenlabs) as! ElevenLabsTTSClient
+        let text = "Hello world testing"
+        let startTimes: [Double] = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8]
+        let endTimes: [Double] = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9]
+        
+        let boundaries = eleven.convertAlignmentToWordBoundaries(text: text, startTimes: startTimes, endTimes: endTimes)
+        
+        XCTAssertEqual(boundaries.count, 3)
+        XCTAssertEqual(boundaries[0].text, "Hello")
+        XCTAssertEqual(boundaries[0].offset, 0)
+        XCTAssertEqual(boundaries[0].duration, 500)
+        
+        XCTAssertEqual(boundaries[1].text, "world")
+        XCTAssertEqual(boundaries[1].offset, 600)
+        XCTAssertEqual(boundaries[1].duration, 500)
+        
+        XCTAssertEqual(boundaries[2].text, "testing")
+        XCTAssertEqual(boundaries[2].offset, 1200)
+        XCTAssertEqual(boundaries[2].duration, 700)
+    }
+
+    func testAWSSigV4Signer() {
+        var request = URLRequest(url: URL(string: "https://polly.us-east-1.amazonaws.com/v1/speech")!)
+        let body = "{\"OutputFormat\":\"mp3\",\"Text\":\"Hello\"}".data(using: .utf8)!
+        let date = Date(timeIntervalSince1970: 1600000000) // Deterministic date
+        
+        AWSSigV4Signer.sign(
+            request: &request,
+            body: body,
+            region: "us-east-1",
+            accessKeyId: "test-access-key-id",
+            secretAccessKey: "test-secret-access-key",
+            currentDate: date
+        )
+        
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Host"), "polly.us-east-1.amazonaws.com")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Amz-Date"), "20200913T122640Z")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        
+        let authHeader = request.value(forHTTPHeaderField: "Authorization")
+        XCTAssertNotNil(authHeader)
+        XCTAssertTrue(authHeader!.contains("AWS4-HMAC-SHA256 Credential=test-access-key-id/20200913/us-east-1/polly/aws4_request"))
+        XCTAssertTrue(authHeader!.contains("SignedHeaders=content-type;host;x-amz-date"))
+    }
+
+    func testSystemTTSClientISOMapping() {
+        XCTAssertEqual(SystemTTSClient.iso639_3(from: "en-US"), "eng")
+        XCTAssertEqual(SystemTTSClient.iso639_3(from: "es-ES"), "spa")
+        XCTAssertEqual(SystemTTSClient.iso639_3(from: "zh-CN"), "zho")
+        XCTAssertEqual(SystemTTSClient.iso639_3(from: "fr-FR"), "fra")
+        XCTAssertEqual(SystemTTSClient.iso639_3(from: "unknown-lang"), "unknown")
+    }
 }
 

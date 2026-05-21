@@ -197,7 +197,7 @@ public final class ElevenLabsTTSClient: AbstractTTSClient, @unchecked Sendable {
         }
     }
 
-    private func convertAlignmentToWordBoundaries(text: String, startTimes: [Double], endTimes: [Double]) -> [WordBoundary] {
+    internal func convertAlignmentToWordBoundaries(text: String, startTimes: [Double], endTimes: [Double]) -> [WordBoundary] {
         var wordBoundaries: [WordBoundary] = []
         let nsText = text as NSString
         let regex = try? NSRegularExpression(pattern: "\\S+")

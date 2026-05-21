@@ -286,7 +286,7 @@ public final class SystemTTSClient: AbstractTTSClient, AVSpeechSynthesizerDelega
         data.append(Data(bytes: &v, count: 2))
     }
 
-    private static func iso639_3(from bcp47: String) -> String {
+    internal static func iso639_3(from bcp47: String) -> String {
         let mapping: [String: String] = [
             "af": "afr", "ar": "ara", "bg": "bul", "ca": "cat", "cs": "ces",
             "da": "dan", "de": "deu", "el": "ell", "en": "eng", "es": "spa",
