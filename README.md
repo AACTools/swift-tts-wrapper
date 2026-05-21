@@ -1,5 +1,8 @@
 # swift-tts-wrapper
 
+[![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fwillwade%2Fswift-tts-wrapper%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/willwade/swift-tts-wrapper)
+[![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fwillwade%2Fswift-tts-wrapper%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/willwade/swift-tts-wrapper)
+
 A native Swift package that provides a unified interface for working with local offline and cloud-based Text-to-Speech (TTS) services on iOS and macOS. Inspired by [js-tts-wrapper](https://github.com/willwade/js-tts-wrapper), it simplifies speech synthesis across multiple engines with a single consistent API.
 
 ## Features
