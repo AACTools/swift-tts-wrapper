@@ -79,15 +79,29 @@ public final class AudioPlayer: NSObject, AVAudioPlayerDelegate {
     private func startTimer() {
         guard !boundaries.isEmpty else { return }
         stopTimer()
-        // Poll player current playback time at 20ms intervals (50Hz) for precise boundary callbacks
-        timer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { [weak self] _ in
-            self?.checkBoundaries()
+        
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            guard self.timer == nil, !self.boundaries.isEmpty else { return }
+            
+            let t = Timer(timeInterval: 0.02, repeats: true) { [weak self] _ in
+                self?.checkBoundaries()
+            }
+            RunLoop.main.add(t, forMode: .common)
+            self.timer = t
         }
     }
 
     private func stopTimer() {
-        timer?.invalidate()
-        timer = nil
+        if Thread.isMainThread {
+            timer?.invalidate()
+            timer = nil
+        } else {
+            DispatchQueue.main.sync {
+                timer?.invalidate()
+                timer = nil
+            }
+        }
     }
 
     private func checkBoundaries() {
