@@ -159,21 +159,7 @@ public final class SherpaOnnxModelManager {
     }
 
     private func extractTarBz2(archivePath: String, destDir: URL, modelType: SherpaOnnxModelType) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["tar", "xf", archivePath, "-C", destDir.path]
-
-        let pipe = Pipe()
-        process.standardError = pipe
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            let errorData = pipe.fileHandleForReading.readDataToEndOfFile()
-            let errorMsg = String(data: errorData, encoding: .utf8) ?? "Unknown tar error"
-            throw NSError(domain: "SherpaOnnxModelManager", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "tar extraction failed: \(errorMsg)"])
-        }
-
+        try ArchiveExtractor.extractTarBz2(archivePath: archivePath, destDir: destDir)
         normalizeExtractedFiles(in: destDir)
     }
 
