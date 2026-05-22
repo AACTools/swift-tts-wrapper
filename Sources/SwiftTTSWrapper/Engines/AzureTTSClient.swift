@@ -1,10 +1,10 @@
 import Foundation
 
-/// Azure Cognitive Services TTS Client wrapping the Microsoft Azure Speech REST API.
 public final class AzureTTSClient: AbstractTTSClient, @unchecked Sendable {
     private let player = AudioPlayer()
     private var voice = "en-US-AriaNeural"
     private var outputFormat = "audio-16khz-128kbitrate-mono-mp3"
+    private var cachedBoundaries: [WordBoundary] = []
 
     public override init(credentials: TTSCredentials = [:]) {
         super.init(credentials: credentials)
@@ -32,7 +32,65 @@ public final class AzureTTSClient: AbstractTTSClient, @unchecked Sendable {
         }
     }
 
+    private func buildSSML(_ text: String, options: SpeakOptions?) -> String {
+        if options?.rawSSML == true {
+            return text
+        }
+
+        let selectedVoice = options?.voice ?? voice
+        let langCode = String(selectedVoice.prefix(5))
+
+        var escapedText = text
+        escapedText = escapedText.replacingOccurrences(of: "&", with: "&amp;")
+        escapedText = escapedText.replacingOccurrences(of: "<", with: "&lt;")
+        escapedText = escapedText.replacingOccurrences(of: ">", with: "&gt;")
+        escapedText = escapedText.replacingOccurrences(of: "\"", with: "&amp;quot;")
+        escapedText = escapedText.replacingOccurrences(of: "'", with: "&amp;apos;")
+
+        return """
+        <speak version='1.0' xml:lang='\(langCode)'>
+            <voice xml:lang='\(langCode)' name='\(selectedVoice)'>
+                \(escapedText)
+            </voice>
+        </speak>
+        """
+    }
+
     public override func synthToBytes(_ text: String, options: SpeakOptions?) async throws -> Data {
+        if options?.useWordBoundary == true {
+            let result = try await synthViaWebSocket(text, options: options)
+            cachedBoundaries = result.boundaries
+            return result.audio
+        }
+        cachedBoundaries = []
+        return try await synthViaREST(text, options: options)
+    }
+
+    public override func speak(_ input: SpeakInput, options: SpeakOptions?) async throws {
+        stop()
+
+        switch input {
+        case .text(let text):
+            let data = try await synthToBytes(text, options: options)
+            let boundaries = options?.useWordBoundary == true ? cachedBoundaries : []
+            try player.play(data: data, boundaries: boundaries)
+
+        case .file(let url):
+            try player.play(url: url)
+
+        case .bytes(let data):
+            try player.play(data: data)
+
+        case .stream(let stream):
+            var data = Data()
+            for try await chunk in stream {
+                data.append(chunk)
+            }
+            try player.play(data: data)
+        }
+    }
+
+    private func synthViaREST(_ text: String, options: SpeakOptions?) async throws -> Data {
         let key = credentials["subscriptionKey"] ?? credentials["apiKey"] ?? ProcessInfo.processInfo.environment["AZURE_TTS_KEY"]
         guard let subscriptionKey = key, !subscriptionKey.isEmpty else {
             throw NSError(domain: "AzureTTSClient", code: 401, userInfo: [NSLocalizedDescriptionKey: "Missing Azure subscriptionKey"])
@@ -51,30 +109,7 @@ public final class AzureTTSClient: AbstractTTSClient, @unchecked Sendable {
         request.addValue(outputFormat, forHTTPHeaderField: "X-Microsoft-OutputFormat")
         request.addValue("SwiftTTSWrapper", forHTTPHeaderField: "User-Agent")
 
-        let selectedVoice = options?.voice ?? voice
-        let langCode = String(selectedVoice.prefix(5)) // e.g. "en-US"
-
-        // XML Escaping
-        var escapedText = text
-        escapedText = escapedText.replacingOccurrences(of: "&", with: "&amp;")
-        escapedText = escapedText.replacingOccurrences(of: "<", with: "&lt;")
-        escapedText = escapedText.replacingOccurrences(of: ">", with: "&gt;")
-        escapedText = escapedText.replacingOccurrences(of: "\"", with: "&amp;quot;")
-        escapedText = escapedText.replacingOccurrences(of: "'", with: "&amp;apos;")
-
-        let ssml: String
-        if options?.rawSSML == true {
-            ssml = text
-        } else {
-            ssml = """
-            <speak version='1.0' xml:lang='\(langCode)'>
-                <voice xml:lang='\(langCode)' name='\(selectedVoice)'>
-                    \(escapedText)
-                </voice>
-            </speak>
-            """
-        }
-
+        let ssml = buildSSML(text, options: options)
         request.httpBody = ssml.data(using: .utf8)
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -86,28 +121,126 @@ public final class AzureTTSClient: AbstractTTSClient, @unchecked Sendable {
         return data
     }
 
-    public override func speak(_ input: SpeakInput, options: SpeakOptions?) async throws {
-        stop()
+    private struct WebSocketSynthResult {
+        let audio: Data
+        let boundaries: [WordBoundary]
+    }
 
-        switch input {
-        case .text(let text):
-            let data = try await synthToBytes(text, options: options)
-            let boundaries = options?.useWordBoundary == true ? WordTimingEstimator.estimate(text: text) : []
-            try player.play(data: data, boundaries: boundaries)
-
-        case .file(let url):
-            try player.play(url: url)
-
-        case .bytes(let data):
-            try player.play(data: data)
-
-        case .stream(let stream):
-            var data = Data()
-            for try await chunk in stream {
-                data.append(chunk)
-            }
-            try player.play(data: data)
+    private func synthViaWebSocket(_ text: String, options: SpeakOptions?) async throws -> WebSocketSynthResult {
+        let key = credentials["subscriptionKey"] ?? credentials["apiKey"] ?? ProcessInfo.processInfo.environment["AZURE_TTS_KEY"]
+        guard let subscriptionKey = key, !subscriptionKey.isEmpty else {
+            throw NSError(domain: "AzureTTSClient", code: 401, userInfo: [NSLocalizedDescriptionKey: "Missing Azure subscriptionKey"])
         }
+
+        let region = credentials["region"] ?? "eastus"
+        let requestId = UUID().uuidString.lowercased()
+        let wsURLStr = "wss://\(region).tts.speech.microsoft.com/cognitiveservices/websocket/v1?Ocp-Apim-Subscription-Key=\(subscriptionKey)"
+        guard let wsURL = URL(string: wsURLStr) else {
+            throw NSError(domain: "AzureTTSClient", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid Azure WebSocket URL"])
+        }
+
+        let request = URLRequest(url: wsURL)
+        let webSocketTask = URLSession.shared.webSocketTask(with: request)
+        webSocketTask.resume()
+
+        let selectedFormat = outputFormat
+        let configMessage = """
+        X-RequestId:\(requestId)\r\n
+        Content-Type:application/json; charset=utf-8\r\n
+        Path:speech.config\r\n\r\n
+        {"context":{"synthesis":{"audio":{"metadataOptions":{"sentenceBoundaryEnabled":false,"wordBoundaryEnabled":true},"outputFormat":"\(selectedFormat)"}}}}
+        """
+
+        try await webSocketTask.send(.string(configMessage))
+
+        let ssml = buildSSML(text, options: options)
+        let ssmlMessage = """
+        X-RequestId:\(requestId)\r\n
+        Content-Type:application/ssml+xml\r\n
+        X-StreamId:\(requestId)\r\n
+        Path:ssml\r\n\r\n
+        \(ssml)
+        """
+        try await webSocketTask.send(.string(ssmlMessage))
+
+        var audioData = Data()
+        var boundaries: [WordBoundary] = []
+
+        while true {
+            let message = try await webSocketTask.receive()
+
+            switch message {
+            case .string(let textMessage):
+                let path = Self.extractPath(from: textMessage)
+
+                if path == "turn.end" {
+                    webSocketTask.cancel(with: .normalClosure, reason: nil)
+                    let computed = Self.computeDurations(boundaries)
+                    return WebSocketSynthResult(audio: audioData, boundaries: computed)
+                }
+
+                if path == "word-boundary" {
+                    if let bodyStart = textMessage.range(of: "\r\n\r\n") {
+                        let body = String(textMessage[bodyStart.upperBound...])
+                        if let jsonData = body.data(using: .utf8),
+                           let json = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
+                            let offsetTicks = json["Offset"] as? Int64 ?? 0
+                            let durationTicks = json["Duration"] as? Int64 ?? 0
+                            let textObj = json["Text"] as? [String: Any]
+                            let wordText = textObj?["Text"] as? String ?? ""
+
+                            if !wordText.isEmpty {
+                                boundaries.append(WordBoundary(
+                                    text: wordText,
+                                    offset: Int(offsetTicks / 10_000),
+                                    duration: Int(durationTicks / 10_000)
+                                ))
+                            }
+                        }
+                    }
+                }
+
+            case .data(let binaryMessage):
+                if binaryMessage.count > 2 {
+                    let headerLength = Int(binaryMessage[0]) << 8 | Int(binaryMessage[1])
+                    if headerLength < binaryMessage.count {
+                        let audioStart = 2 + headerLength
+                        if audioStart < binaryMessage.count {
+                            audioData.append(binaryMessage[audioStart...])
+                        }
+                    }
+                }
+
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    private static func extractPath(from message: String) -> String {
+        for line in message.components(separatedBy: "\r\n") {
+            if line.hasPrefix("Path:") {
+                return String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return ""
+    }
+
+    private static func computeDurations(_ boundaries: [WordBoundary]) -> [WordBoundary] {
+        guard boundaries.count > 1 else {
+            return boundaries.map { WordBoundary(text: $0.text, offset: $0.offset, duration: max($0.duration, 500)) }
+        }
+
+        var result = boundaries
+        for i in 0..<(result.count - 1) {
+            if result[i].duration == 0 {
+                result[i].duration = result[i + 1].offset - result[i].offset
+            }
+        }
+        if result[result.count - 1].duration == 0 {
+            result[result.count - 1].duration = 500
+        }
+        return result
     }
 
     public override func getVoices() async throws -> [UnifiedVoice] {

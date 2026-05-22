@@ -9,7 +9,7 @@ A native Swift package that provides a unified interface for working with local 
 
 - **Unified API**: A single protocol (`TTSClient`) with consistent methods for speech synthesis and playback control.
 - **21 Engines**: System, 19 cloud REST APIs, and on-device sherpa-onnx (VITS/Kokoro/Matcha/MMS).
-- **Zero Dependencies**: Core `SwiftTTSWrapper` target has no third-party dependencies (Polly signs requests with CryptoKit).
+- **SpeechMarkdown Support**: Built-in [SpeechMarkdown](https://speechmarkdown.org) parsing via [speechmarkdown-rust](https://github.com/AACTools/speechmarkdown-rust) — write pronounceable, cross-platform speech markup and auto-convert to engine-specific SSML.
 - **Real-Time Streaming**: 16 cloud engines stream audio incrementally; system engine streams from synthesizer callbacks.
 - **Word-Level Timing**: ElevenLabs and System engines provide real word timestamps from the API; all others use a heuristic estimator.
 - **On-Device TTS**: Optional sherpa-onnx integration for fully offline synthesis with 1300+ models.
@@ -17,7 +17,7 @@ A native Swift package that provides a unified interface for working with local 
 
 ## Installation
 
-### Core Package (zero dependencies)
+### Core Package
 
 ```swift
 // Package.swift
@@ -28,6 +28,8 @@ targets: [
     .target(name: "YourApp", dependencies: ["SwiftTTSWrapper"]),
 ]
 ```
+
+> **Note:** The core package depends on [speechmarkdown-rust](https://github.com/AACTools/speechmarkdown-rust) (branch `spm`) for SpeechMarkdown support. This binary XCFramework is downloaded automatically by SPM.
 
 ### With sherpa-onnx (on-device TTS)
 
@@ -72,7 +74,7 @@ targets: [
 | `watson` | `WatsonTTSClient` | Real | Estimated | WAV |
 | `witai` | `WitAITTSClient` | Real | Estimated | PCM/MP3/WAV |
 | `xai` | `XAITTSClient` | Real | Estimated | varies |
-| `azure` | `AzureTTSClient` | No (collects full response) | Estimated | MP3 |
+| `azure` | `AzureTTSClient` | No (collects full response) | **Real** (WebSocket word-boundary events) | MP3 |
 | `google` | `GoogleTTSClient` | No (collects full response) | Estimated | MP3 |
 | `modelslab` | `ModelsLabTTSClient` | Buffered (may poll) | Estimated | varies |
 
@@ -128,6 +130,39 @@ for voice in voices {
     print("\(voice.name) - \(voice.languageCodes.first?.display ?? "")")
 }
 ```
+
+### SpeechMarkdown
+
+All text inputs accept [SpeechMarkdown](https://speechmarkdown.org) syntax. Set `useSpeechMarkdown: true` in `SpeakOptions` to convert it to engine-specific SSML before synthesis:
+
+```swift
+let options = SpeakOptions(useSpeechMarkdown: true)
+
+// SpeechMarkdown input with emphasis, breaks, rate changes, etc.
+try await client.speak("Hello (world)[emphasis:\"strong\"] [500ms] Goodbye.", options: options)
+```
+
+You can also use the `SpeechMarkdown` library directly:
+
+```swift
+import SpeechMarkdown
+
+let parser = SpeechMarkdownParser()
+
+// Check if text contains SpeechMarkdown
+parser.isSpeechMarkdown(input: "Hello (world)[emphasis:\"strong\"]") // true
+
+// Convert to platform-specific SSML
+let ssml = try parser.toSsml(input: "Hello (world)[rate:\"fast\"]", platform: "microsoft-azure")
+
+// Strip to plain text
+let text = try parser.toText(input: "Hello (world)[emphasis:\"strong\"]") // "Hello world"
+
+// Convert SSML back to SpeechMarkdown (best-effort)
+let smd = try parser.toSmd(ssml: "<speak><emphasis level=\"strong\">word</emphasis></speak>") // "++word++"
+```
+
+Supported platforms: `amazon-alexa`, `google-assistant`, `microsoft-azure`, `apple`, `w3c`, `samsung-bixby`, `elevenlabs`, `ibm-watson`.
 
 ### sherpa-onnx On-Device
 
@@ -202,9 +237,26 @@ Sources/
     └── SherpaOnnxDefaultEngine.swift // Default engine calling C API directly
 ```
 
+## Example App
+
+The `Examples/SimpleTTS` directory contains a macOS SwiftUI demo with SpeechMarkdown editing, formatting toolbar, and multi-engine switching. It depends on sherpa-onnx-spm, which has a known SPM linking issue on macOS: `onnxruntime.a` lacks the `lib` prefix, so SPM won't auto-link it. Use the bundled build script:
+
+```bash
+# From repo root — creates the needed symlink and builds
+./Examples/SimpleTTS/build.sh
+```
+
+Or manually after `swift build`:
+
+```bash
+cd Examples/SimpleTTS
+ln -sf onnxruntime.a .build/arm64-apple-macosx/debug/libonnxruntime.a
+swift build
+```
+
 ## Swift Package Index Builds
 
-This package uses binary XCFramework dependencies ([sherpa-onnx-spm](https://github.com/willwade/sherpa-onnx-spm) and [speechmarkdown-rust](https://github.com/AACTools/speechmarkdown-rust)) that only ship macOS/iOS slices. The Swift Package Index builds on Linux, where these binary targets cannot be resolved. This causes SPI to report "no compatibility" even though the package works fully on macOS 13+ and iOS 16+.
+This package depends on binary XCFrameworks ([sherpa-onnx-spm](https://github.com/willwade/sherpa-onnx-spm) and [speechmarkdown-rust](https://github.com/AACTools/speechmarkdown-rust)) that ship macOS and iOS slices only. The Swift Package Index builds on Linux, where these binary targets cannot be resolved, causing SPI to report "no compatibility". The package works fully on macOS 13+ and iOS 16+.
 
 ## Requirements
 

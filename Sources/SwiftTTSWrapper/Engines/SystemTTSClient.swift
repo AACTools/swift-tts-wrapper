@@ -228,7 +228,12 @@ public final class SystemTTSClient: AbstractTTSClient, AVSpeechSynthesizerDelega
     // MARK: - Private Helpers
 
     private func makeUtterance(text: String, options: SpeakOptions?) -> AVSpeechUtterance {
-        let utterance = AVSpeechUtterance(string: text)
+        let utterance: AVSpeechUtterance
+        if options?.rawSSML == true, let ssmlUtterance = AVSpeechUtterance(ssmlRepresentation: text) {
+            utterance = ssmlUtterance
+        } else {
+            utterance = AVSpeechUtterance(string: text)
+        }
 
         if let rate = options?.rate {
             utterance.rate = rate.rateValue

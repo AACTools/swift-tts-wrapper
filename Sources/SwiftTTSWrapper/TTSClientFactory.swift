@@ -23,6 +23,19 @@ public enum TTSEngine: String, CaseIterable {
     case witai
     case xai
     case sherpaonnx
+
+    /// The SpeechMarkdown platform string for this engine.
+    public var speechMarkdownPlatform: String {
+        switch self {
+        case .azure: return "microsoft-azure"
+        case .google: return "google-assistant"
+        case .polly: return "amazon-polly"
+        case .watson, .witai: return "ibm-watson"
+        case .elevenlabs: return "elevenlabs"
+        case .system: return "apple"
+        default: return "w3c"
+        }
+    }
 }
 
 /// Factory class to dynamically instantiate TTS Clients.
