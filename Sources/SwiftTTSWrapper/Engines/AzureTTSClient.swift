@@ -33,12 +33,21 @@ public final class AzureTTSClient: AbstractTTSClient, @unchecked Sendable {
     }
 
     private func buildSSML(_ text: String, options: SpeakOptions?) -> String {
-        if options?.rawSSML == true {
-            return text
-        }
-
         let selectedVoice = options?.voice ?? voice
         let langCode = String(selectedVoice.prefix(5))
+
+        if options?.rawSSML == true {
+            if let body = Self.extractSSMLBody(text) {
+                return """
+                <speak version='1.0' xml:lang='\(langCode)'>
+                    <voice xml:lang='\(langCode)' name='\(selectedVoice)'>
+                        \(body)
+                    </voice>
+                </speak>
+                """
+            }
+            return text
+        }
 
         var escapedText = text
         escapedText = escapedText.replacingOccurrences(of: "&", with: "&amp;")
@@ -54,6 +63,14 @@ public final class AzureTTSClient: AbstractTTSClient, @unchecked Sendable {
             </voice>
         </speak>
         """
+    }
+
+    private static func extractSSMLBody(_ ssml: String) -> String? {
+        guard let openRange = ssml.range(of: "<speak", options: .caseInsensitive) else { return nil }
+        guard let tagEnd = ssml.range(of: ">", range: openRange.lowerBound..<ssml.endIndex) else { return nil }
+        guard let closeRange = ssml.range(of: "</speak>", options: [.caseInsensitive, .backwards]) else { return nil }
+        return String(ssml[tagEnd.upperBound..<closeRange.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     public override func synthToBytes(_ text: String, options: SpeakOptions?) async throws -> Data {
@@ -144,23 +161,14 @@ public final class AzureTTSClient: AbstractTTSClient, @unchecked Sendable {
         webSocketTask.resume()
 
         let selectedFormat = outputFormat
-        let configMessage = """
-        X-RequestId:\(requestId)\r\n
-        Content-Type:application/json; charset=utf-8\r\n
-        Path:speech.config\r\n\r\n
-        {"context":{"synthesis":{"audio":{"metadataOptions":{"sentenceBoundaryEnabled":false,"wordBoundaryEnabled":true},"outputFormat":"\(selectedFormat)"}}}}
-        """
+        let configHeaders = "X-RequestId:\(requestId)\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n"
+        let configBody = #"{"context":{"synthesis":{"audio":{"metadataOptions":{"sentenceBoundaryEnabled":false,"wordBoundaryEnabled":true},"outputFormat":"\#(selectedFormat)"}}}}"#
+        let configMessage = configHeaders + configBody
 
         try await webSocketTask.send(.string(configMessage))
 
         let ssml = buildSSML(text, options: options)
-        let ssmlMessage = """
-        X-RequestId:\(requestId)\r\n
-        Content-Type:application/ssml+xml\r\n
-        X-StreamId:\(requestId)\r\n
-        Path:ssml\r\n\r\n
-        \(ssml)
-        """
+        let ssmlMessage = "X-RequestId:\(requestId)\r\nContent-Type:application/ssml+xml\r\nX-StreamId:\(requestId)\r\nPath:ssml\r\n\r\n\(ssml)"
         try await webSocketTask.send(.string(ssmlMessage))
 
         var audioData = Data()
@@ -179,19 +187,35 @@ public final class AzureTTSClient: AbstractTTSClient, @unchecked Sendable {
                     return WebSocketSynthResult(audio: audioData, boundaries: computed)
                 }
 
-                if path == "word-boundary" {
-                    if let bodyStart = textMessage.range(of: "\r\n\r\n") {
-                        let body = String(textMessage[bodyStart.upperBound...])
-                        if let jsonData = body.data(using: .utf8),
-                           let json = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
-                            let offsetTicks = json["Offset"] as? Int64 ?? 0
-                            let durationTicks = json["Duration"] as? Int64 ?? 0
-                            let textObj = json["Text"] as? [String: Any]
-                            let wordText = textObj?["Text"] as? String ?? ""
+                if path == "audio.metadata" || path == "word-boundary" {
+                    let body: String
+                    if let sep = textMessage.range(of: "\r\n\r\n") {
+                        body = String(textMessage[sep.upperBound...])
+                    } else if let sep = textMessage.range(of: "\n\n") {
+                        body = String(textMessage[sep.upperBound...])
+                    } else {
+                        body = textMessage
+                    }
+                    guard let jsonData = body.data(using: .utf8),
+                          let json = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else { break }
 
-                            if !wordText.isEmpty {
+                    if let metadata = json["Metadata"] as? [[String: Any]] {
+                        for item in metadata {
+                            guard item["Type"] as? String == "WordBoundary",
+                                  let data = item["Data"] as? [String: Any] else { continue }
+                            let offsetTicks = data["Offset"] as? Int64 ?? 0
+                            let durationTicks = data["Duration"] as? Int64 ?? 0
+                            let word: String
+                            if let textObj = data["text"] as? [String: Any] {
+                                word = textObj["Text"] as? String ?? ""
+                            } else if let textObj = data["Text"] as? [String: Any] {
+                                word = textObj["Text"] as? String ?? ""
+                            } else {
+                                word = data["text"] as? String ?? ""
+                            }
+                            if !word.isEmpty {
                                 boundaries.append(WordBoundary(
-                                    text: wordText,
+                                    text: word,
                                     offset: Int(offsetTicks / 10_000),
                                     duration: Int(durationTicks / 10_000)
                                 ))
@@ -203,11 +227,9 @@ public final class AzureTTSClient: AbstractTTSClient, @unchecked Sendable {
             case .data(let binaryMessage):
                 if binaryMessage.count > 2 {
                     let headerLength = Int(binaryMessage[0]) << 8 | Int(binaryMessage[1])
-                    if headerLength < binaryMessage.count {
+                    if binaryMessage.count > 2 + headerLength {
                         let audioStart = 2 + headerLength
-                        if audioStart < binaryMessage.count {
-                            audioData.append(binaryMessage[audioStart...])
-                        }
+                        audioData.append(binaryMessage[audioStart...])
                     }
                 }
 
