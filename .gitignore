@@ -61,6 +61,3 @@ fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
 Package.resolved
-
-# SpeechMarkdown Rust package (downloaded from GitHub releases)
-speechmarkdown-swift-package/

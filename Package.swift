@@ -17,13 +17,13 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/willwade/sherpa-onnx-spm.git", "1.13.2"..<"1.14.0"),
-        .package(path: "./speechmarkdown-swift-package"),
+        .package(url: "https://github.com/AACTools/speechmarkdown-rust", branch: "spm"),
     ],
     targets: [
         .target(
             name: "SwiftTTSWrapper",
             dependencies: [
-                .product(name: "SpeechMarkdown", package: "speechmarkdown-swift-package"),
+                .product(name: "SpeechMarkdown", package: "speechmarkdown-rust"),
             ],
             resources: [
                 .process("Resources")

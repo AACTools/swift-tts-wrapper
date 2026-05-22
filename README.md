@@ -202,6 +202,10 @@ Sources/
     └── SherpaOnnxDefaultEngine.swift // Default engine calling C API directly
 ```
 
+## Swift Package Index Builds
+
+This package uses binary XCFramework dependencies ([sherpa-onnx-spm](https://github.com/willwade/sherpa-onnx-spm) and [speechmarkdown-rust](https://github.com/AACTools/speechmarkdown-rust)) that only ship macOS/iOS slices. The Swift Package Index builds on Linux, where these binary targets cannot be resolved. This causes SPI to report "no compatibility" even though the package works fully on macOS 13+ and iOS 16+.
+
 ## Requirements
 
 - Swift 5.9+
