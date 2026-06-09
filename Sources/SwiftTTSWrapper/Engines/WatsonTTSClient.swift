@@ -126,11 +126,35 @@ public final class WatsonTTSClient: AbstractTTSClient, @unchecked Sendable {
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.addValue("audio/wav", forHTTPHeaderField: "Accept")
 
-        let body: [String: Any] = [
-            "text": text,
-            "voice": selectedVoice,
-            "accept": "audio/wav"
-        ]
+        var attrs: [String] = []
+        if let rate = options?.rate, rate != .medium {
+            attrs.append("rate=\"\(rate.rawValue)\"")
+        }
+        if let pitch = options?.pitch, pitch != .medium {
+            attrs.append("pitch=\"\(pitch.rawValue)\"")
+        }
+        if let volume = options?.volume {
+            let pct = Int(min(max(volume, 0), 1.0) * 100)
+            if pct != 100 {
+                attrs.append("volume=\"\(pct)%\"")
+            }
+        }
+
+        let body: [String: Any]
+        if attrs.isEmpty {
+            body = [
+                "text": text,
+                "voice": selectedVoice,
+                "accept": "audio/wav"
+            ]
+        } else {
+            let ssml = "<speak><prosody \(attrs.joined(separator: " "))>\(text)</prosody></speak>"
+            body = [
+                "text": ssml,
+                "voice": selectedVoice,
+                "accept": "audio/wav"
+            ]
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -165,11 +189,35 @@ public final class WatsonTTSClient: AbstractTTSClient, @unchecked Sendable {
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.addValue("audio/wav", forHTTPHeaderField: "Accept")
 
-        let body: [String: Any] = [
-            "text": text,
-            "voice": selectedVoice,
-            "accept": "audio/wav"
-        ]
+        var attrs: [String] = []
+        if let rate = options?.rate, rate != .medium {
+            attrs.append("rate=\"\(rate.rawValue)\"")
+        }
+        if let pitch = options?.pitch, pitch != .medium {
+            attrs.append("pitch=\"\(pitch.rawValue)\"")
+        }
+        if let volume = options?.volume {
+            let pct = Int(min(max(volume, 0), 1.0) * 100)
+            if pct != 100 {
+                attrs.append("volume=\"\(pct)%\"")
+            }
+        }
+
+        let body: [String: Any]
+        if attrs.isEmpty {
+            body = [
+                "text": text,
+                "voice": selectedVoice,
+                "accept": "audio/wav"
+            ]
+        } else {
+            let ssml = "<speak><prosody \(attrs.joined(separator: " "))>\(text)</prosody></speak>"
+            body = [
+                "text": ssml,
+                "voice": selectedVoice,
+                "accept": "audio/wav"
+            ]
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (bytes, response) = try await URLSession.shared.bytes(for: request)

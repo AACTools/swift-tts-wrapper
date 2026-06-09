@@ -36,30 +36,29 @@ public final class AzureTTSClient: AbstractTTSClient, @unchecked Sendable {
         let selectedVoice = options?.voice ?? voice
         let langCode = String(selectedVoice.prefix(5))
 
+        let content: String
         if options?.rawSSML == true {
             if let body = Self.extractSSMLBody(text) {
-                return """
-                <speak version='1.0' xml:lang='\(langCode)'>
-                    <voice xml:lang='\(langCode)' name='\(selectedVoice)'>
-                        \(body)
-                    </voice>
-                </speak>
-                """
+                content = body
+            } else {
+                return text
             }
-            return text
+        } else {
+            var escapedText = text
+            escapedText = escapedText.replacingOccurrences(of: "&", with: "&amp;")
+            escapedText = escapedText.replacingOccurrences(of: "<", with: "&lt;")
+            escapedText = escapedText.replacingOccurrences(of: ">", with: "&gt;")
+            escapedText = escapedText.replacingOccurrences(of: "\"", with: "&amp;quot;")
+            escapedText = escapedText.replacingOccurrences(of: "'", with: "&amp;apos;")
+            content = escapedText
         }
 
-        var escapedText = text
-        escapedText = escapedText.replacingOccurrences(of: "&", with: "&amp;")
-        escapedText = escapedText.replacingOccurrences(of: "<", with: "&lt;")
-        escapedText = escapedText.replacingOccurrences(of: ">", with: "&gt;")
-        escapedText = escapedText.replacingOccurrences(of: "\"", with: "&amp;quot;")
-        escapedText = escapedText.replacingOccurrences(of: "'", with: "&amp;apos;")
+        let wrapped = constructProsodyTag(content, options: options)
 
         return """
         <speak version='1.0' xml:lang='\(langCode)'>
             <voice xml:lang='\(langCode)' name='\(selectedVoice)'>
-                \(escapedText)
+                \(wrapped)
             </voice>
         </speak>
         """

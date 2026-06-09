@@ -106,4 +106,22 @@ open class AbstractTTSClient: NSObject, TTSClient, @unchecked Sendable {
     open func checkCredentials() async -> Bool {
         return true
     }
+
+    public func constructProsodyTag(_ text: String, options: SpeakOptions?) -> String {
+        var attrs: [String] = []
+        if let rate = options?.rate, rate != .medium {
+            attrs.append("rate=\"\(rate.rawValue)\"")
+        }
+        if let pitch = options?.pitch, pitch != .medium {
+            attrs.append("pitch=\"\(pitch.rawValue)\"")
+        }
+        if let volume = options?.volume {
+            let pct = Int(min(max(volume, 0), 1.0) * 100)
+            if pct != 100 {
+                attrs.append("volume=\"\(pct)\"")
+            }
+        }
+        if attrs.isEmpty { return text }
+        return "<prosody \(attrs.joined(separator: " "))>\(text)</prosody>"
+    }
 }

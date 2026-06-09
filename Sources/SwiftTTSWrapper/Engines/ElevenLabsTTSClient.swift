@@ -63,6 +63,13 @@ public final class ElevenLabsTTSClient: AbstractTTSClient, @unchecked Sendable {
             "use_speaker_boost": true
         ]
 
+        if let rate = options?.rate {
+            let speedMap: [SpeechRate: Float] = [
+                .xSlow: 0.5, .slow: 0.75, .medium: 1.0, .fast: 1.25, .xFast: 1.5
+            ]
+            voiceSettings["speed"] = speedMap[rate] ?? 1.0
+        }
+
         if let customSettings = options?.extraOptions?["voiceSettings"] as? [String: Any] {
             for (k, v) in customSettings {
                 voiceSettings[k] = v
@@ -146,6 +153,13 @@ public final class ElevenLabsTTSClient: AbstractTTSClient, @unchecked Sendable {
             "similarity_boost": 0.75,
             "use_speaker_boost": true
         ]
+
+        if let rate = options?.rate {
+            let speedMap: [SpeechRate: Float] = [
+                .xSlow: 0.5, .slow: 0.75, .medium: 1.0, .fast: 1.25, .xFast: 1.5
+            ]
+            voiceSettings["speed"] = speedMap[rate] ?? 1.0
+        }
 
         if let customSettings = options?.extraOptions?["voiceSettings"] as? [String: Any] {
             for (k, v) in customSettings {

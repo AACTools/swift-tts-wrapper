@@ -122,6 +122,30 @@ let audioBytes = try await client.synthToBytes("Generate audio data")
 // Returns raw Data (MP3, WAV, etc. depending on engine)
 ```
 
+### Rate, Pitch & Volume
+
+Control speech rate, pitch, and volume via `SpeakOptions`. Engines that support SSML use `<prosody>` tags; others use their native parameters.
+
+```swift
+let options = SpeakOptions(
+    rate: .fast,       // .xSlow, .slow, .medium, .fast, .xFast
+    pitch: .high,      // .xLow, .low, .medium, .high, .xHigh
+    volume: 0.7        // 0.0–1.0 (mapped per-engine)
+)
+try await client.speak("Hello, world!", options: options)
+```
+
+| Engine | Rate | Pitch | Volume | Mechanism |
+|--------|------|-------|--------|-----------|
+| System | ✅ | ✅ | ✅ | `AVSpeechUtterane` properties |
+| Azure | ✅ | ✅ | ✅ | SSML `<prosody>` |
+| Google | ✅ | ✅ | ✅ | SSML `<prosody>` (volume in dB) |
+| Polly | ✅ | ✅ | ✅ | SSML `<prosody>` (auto-wraps) |
+| Watson | ✅ | ✅ | ✅ | SSML `<prosody>` (volume in %) |
+| ElevenLabs | ✅ | — | — | `voice_settings.speed` (0.5–1.5) |
+| OpenAI | ✅ | — | — | `speed` JSON param |
+| Others | — | — | — | Ignored silently |
+
 ### Voice Listing
 
 ```swift

@@ -135,6 +135,36 @@ public final class GoogleTTSClient: AbstractTTSClient, @unchecked Sendable {
             inputPayload["text"] = text
         }
 
+        var hasProsody = false
+        var prosodyAttrs: [String] = []
+        if let rate = options?.rate, rate != .medium {
+            prosodyAttrs.append("rate=\"\(rate.rawValue)\"")
+        }
+        if let pitch = options?.pitch, pitch != .medium {
+            prosodyAttrs.append("pitch=\"\(pitch.rawValue)\"")
+        }
+        if let volume = options?.volume {
+            let pct = Int(min(max(volume, 0), 1.0) * 100)
+            if pct != 100 {
+                let db = (pct - 100) / 10
+                prosodyAttrs.append("volume=\"\(db)dB\"")
+            }
+        }
+        hasProsody = !prosodyAttrs.isEmpty
+
+        if hasProsody && !useWordBoundary {
+            if let ssmlStr = inputPayload["ssml"] as? String {
+                if let bodyRange = ssmlStr.range(of: "<speak>"), let closeRange = ssmlStr.range(of: "</speak>", options: .backwards) {
+                    let afterOpen = bodyRange.upperBound
+                    let inner = String(ssmlStr[afterOpen..<closeRange.lowerBound])
+                    inputPayload["ssml"] = "<speak><prosody \(prosodyAttrs.joined(separator: " "))>\(inner)</prosody></speak>"
+                }
+            } else if let textStr = inputPayload["text"] as? String {
+                inputPayload["ssml"] = "<speak><prosody \(prosodyAttrs.joined(separator: " "))>\(textStr)</prosody></speak>"
+                inputPayload.removeValue(forKey: "text")
+            }
+        }
+
         var body: [String: Any] = [
             "input": inputPayload,
             "voice": [
