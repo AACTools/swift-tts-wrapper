@@ -17,7 +17,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/willwade/sherpa-onnx-spm.git", "1.13.4"..<"1.14.0"),
-        .package(url: "https://github.com/AACTools/speechmarkdown-rust", branch: "spm"),
+        .package(url: "https://github.com/AACTools/speechmarkdown-rust", from: "0.2.1"),
     ],
     targets: [
         .target(
