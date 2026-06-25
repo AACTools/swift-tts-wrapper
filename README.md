@@ -9,9 +9,9 @@ A native Swift package that provides a unified interface for working with local 
 
 - **Unified API**: A single protocol (`TTSClient`) with consistent methods for speech synthesis and playback control.
 - **21 Engines**: System, 19 cloud REST APIs, and on-device sherpa-onnx (VITS/Kokoro/Matcha/MMS).
-- **SpeechMarkdown Support**: Built-in [SpeechMarkdown](https://speechmarkdown.org) parsing via [speechmarkdown-rust](https://github.com/AACTools/speechmarkdown-rust) — write pronounceable, cross-platform speech markup and auto-convert to engine-specific SSML.
+- **SpeechMarkdown Support**: Built-in [SpeechMarkdown](https://speechmarkdown.org) parsing via [speechmarkdown-rust](https://github.com/AACTools/speechmarkdown-rust) — write pronounceable, cross-platform speech markup with **auto-detection** (no manual toggle needed). Supports X-SAMPA/Praat/SIL/Branner → IPA phonetic notation.
 - **Real-Time Streaming**: 16 cloud engines stream audio incrementally; system engine streams from synthesizer callbacks.
-- **Word-Level Timing**: ElevenLabs and System engines provide real word timestamps from the API; all others use a heuristic estimator.
+- **Word-Level Timing**: ElevenLabs, Azure, and System engines provide real word timestamps from the API; all others use a heuristic estimator.
 - **On-Device TTS**: Optional sherpa-onnx integration for fully offline synthesis with 1300+ models.
 - **macOS 13+ & iOS 16+**: Supports both platforms with `swift-tools-version: 5.9`.
 
@@ -29,7 +29,7 @@ targets: [
 ]
 ```
 
-> **Note:** The core package depends on [speechmarkdown-rust](https://github.com/AACTools/speechmarkdown-rust) (branch `spm`) for SpeechMarkdown support. This binary XCFramework is downloaded automatically by SPM.
+> **Note:** The core package depends on [speechmarkdown-rust](https://github.com/AACTools/speechmarkdown-rust) for SpeechMarkdown support and [sherpa-onnx-spm](https://github.com/willwade/sherpa-onnx-spm) for on-device TTS. These binary XCFrameworks are downloaded automatically by SPM.
 
 ### With sherpa-onnx (on-device TTS)
 
@@ -75,7 +75,7 @@ targets: [
 | `witai` | `WitAITTSClient` | Real | Estimated | PCM/MP3/WAV |
 | `xai` | `XAITTSClient` | Real | Estimated | varies |
 | `azure` | `AzureTTSClient` | No (collects full response) | **Real** (WebSocket word-boundary events) | MP3 |
-| `google` | `GoogleTTSClient` | No (collects full response) | Estimated | MP3 |
+| `google` | `GoogleTTSClient` | No (collects full response) | **Real** (SSML mark timepoints) | MP3 |
 | `modelslab` | `ModelsLabTTSClient` | Buffered (may poll) | Estimated | varies |
 
 **Streaming**: "Real" = audio chunks arrive incrementally from the API. "Buffered" = full audio collected before yielding. "Chunked" = audio generated locally then split into chunks.
@@ -157,14 +157,47 @@ for voice in voices {
 
 ### SpeechMarkdown
 
-All text inputs accept [SpeechMarkdown](https://speechmarkdown.org) syntax. Set `useSpeechMarkdown: true` in `SpeakOptions` to convert it to engine-specific SSML before synthesis:
+All text inputs accept [SpeechMarkdown](https://speechmarkdown.org) syntax. SpeechMarkdown is **auto-detected** — no need to set any option. The pipeline converts it appropriately per engine:
+
+- **SSML-capable engines** (system, azure, google, polly, watson): markdown → SSML → native SSML synthesis
+- **Non-SSML engines** (openai, elevenlabs, cartesia, etc.): markdown → plain text → API
+
+```swift
+// Auto-detected — no options needed
+try await client.speak("Hello (world)[emphasis:\"strong\"] [500ms] Goodbye.")
+```
+
+You can also force conversion with `useSpeechMarkdown: true`:
 
 ```swift
 let options = SpeakOptions(useSpeechMarkdown: true)
-
-// SpeechMarkdown input with emphasis, breaks, rate changes, etc.
-try await client.speak("Hello (world)[emphasis:\"strong\"] [500ms] Goodbye.", options: options)
+try await client.speak("Hello (world)[rate:\"fast\"]", options: options)
 ```
+
+#### Phonetic Notation (X-SAMPA → IPA)
+
+Use `xsampa`, `praat`, `sil`, or `branner` modifiers to specify pronunciation. The library converts these to IPA and wraps them in SSML `<phoneme>` tags:
+
+```swift
+// Each word uses X-SAMPA phonetic input
+let md = "(Dasher)[xsampa:\"daS@r\"] (is)[xsampa:\"Iz\"] (like)[xsampa:\"laIk\"]"
+
+// SSML-capable engines produce:
+// <speak><phoneme alphabet="ipa" ph="daʃər">Dasher</phoneme> ...</speak>
+
+try await client.speak(md)  // auto-detected, no options needed
+```
+
+| Engine | `<phoneme>` Support | Notes |
+|--------|---------------------|-------|
+| System (AVSynth) | ✅ | Phonemes applied to audio; word boundary events unavailable with SSML input |
+| Azure | ✅ | Full support via SSML |
+| Polly | ✅ | Full support via SSML |
+| Watson | ✅ | Full support via SSML |
+| Google | ⚠️ | SpeechMarkdown library strips to plain text for Google platform |
+| Others | — | Converted to plain text (no phoneme support) |
+
+#### Direct SpeechMarkdown API
 
 You can also use the `SpeechMarkdown` library directly:
 
@@ -181,12 +214,9 @@ let ssml = try parser.toSsml(input: "Hello (world)[rate:\"fast\"]", platform: "m
 
 // Strip to plain text
 let text = try parser.toText(input: "Hello (world)[emphasis:\"strong\"]") // "Hello world"
-
-// Convert SSML back to SpeechMarkdown (best-effort)
-let smd = try parser.toSmd(ssml: "<speak><emphasis level=\"strong\">word</emphasis></speak>") // "++word++"
 ```
 
-Supported platforms: `amazon-alexa`, `google-assistant`, `microsoft-azure`, `apple`, `w3c`, `samsung-bixby`, `elevenlabs`, `ibm-watson`.
+Supported platforms: `apple`, `microsoft-azure`, `google-assistant`, `amazon-polly`, `ibm-watson`, `elevenlabs`, `w3c`.
 
 ### sherpa-onnx On-Device
 
