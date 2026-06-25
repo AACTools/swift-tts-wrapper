@@ -45,6 +45,9 @@ public final class OpenAITTSClient: AbstractTTSClient, @unchecked Sendable {
     }
 
     public override func synthToBytes(_ text: String, options: SpeakOptions?) async throws -> Data {
+        let processed = processText(text, options: options, engine: .openai)
+        let text = processed.text
+
         let apiKey = credentials["apiKey"] ?? ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
         guard let key = apiKey, !key.isEmpty else {
             throw NSError(domain: "OpenAITTSClient", code: 401, userInfo: [NSLocalizedDescriptionKey: "Missing OpenAI API Key"])
@@ -96,6 +99,9 @@ public final class OpenAITTSClient: AbstractTTSClient, @unchecked Sendable {
     }
 
     public override func synthToBytestream(_ text: String, options: SpeakOptions?) async throws -> AsyncThrowingStream<Data, Error> {
+        let processed = processText(text, options: options, engine: .openai)
+        let text = processed.text
+
         let apiKey = credentials["apiKey"] ?? ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
         guard let key = apiKey, !key.isEmpty else {
             throw NSError(domain: "OpenAITTSClient", code: 401, userInfo: [NSLocalizedDescriptionKey: "Missing OpenAI API Key"])
@@ -172,7 +178,8 @@ public final class OpenAITTSClient: AbstractTTSClient, @unchecked Sendable {
         switch input {
         case .text(let text):
             let data = try await synthToBytes(text, options: options)
-            let boundaries = options?.useWordBoundary == true ? WordTimingEstimator.estimate(text: text) : []
+            let plainText = AbstractTTSClient.looksLikeMarkdown(text) ? (AbstractTTSClient.convertMarkdownToText(text) ?? text) : text
+            let boundaries = options?.useWordBoundary == true ? WordTimingEstimator.estimate(text: plainText) : []
             try player.play(data: data, boundaries: boundaries)
 
         case .file(let url):

@@ -40,6 +40,9 @@ public final class SherpaOnnxTTSClient: AbstractTTSClient, @unchecked Sendable {
     }
 
     public override func synthToBytes(_ text: String, options: SpeakOptions?) async throws -> Data {
+        let processed = processText(text, options: options, engine: .sherpaonnx)
+        let text = processed.text
+
         let selectedModelId = options?.voice ?? modelId ?? "kokoro-en-en-19"
 
         try await ensureModelReady(selectedModelId)
@@ -57,6 +60,9 @@ public final class SherpaOnnxTTSClient: AbstractTTSClient, @unchecked Sendable {
     }
 
     public override func synthToBytestream(_ text: String, options: SpeakOptions?) async throws -> AsyncThrowingStream<Data, Error> {
+        let processed = processText(text, options: options, engine: .sherpaonnx)
+        let text = processed.text
+
         let selectedModelId = options?.voice ?? modelId ?? "kokoro-en-en-19"
 
         try await ensureModelReady(selectedModelId)
@@ -91,7 +97,8 @@ public final class SherpaOnnxTTSClient: AbstractTTSClient, @unchecked Sendable {
         switch input {
         case .text(let text):
             let data = try await synthToBytes(text, options: options)
-            let boundaries = options?.useWordBoundary == true ? WordTimingEstimator.estimate(text: text) : []
+            let plainText = AbstractTTSClient.looksLikeMarkdown(text) ? (AbstractTTSClient.convertMarkdownToText(text) ?? text) : text
+            let boundaries = options?.useWordBoundary == true ? WordTimingEstimator.estimate(text: plainText) : []
             try player.play(data: data, boundaries: boundaries)
 
         case .file(let url):

@@ -86,20 +86,21 @@ public final class PollyTTSClient: AbstractTTSClient, @unchecked Sendable {
             sampleRate = "24000"
         }
 
-        let isOriginallySSML = text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<speak>")
+        // Process SpeechMarkdown/SSML pipeline
+        let processed = processText(text, options: options, engine: .polly)
 
         let finalText: String
         let textType: String
-        if isOriginallySSML {
-            finalText = text
+        if processed.isSSML {
+            finalText = processed.text
             textType = "ssml"
         } else {
-            let wrapped = constructProsodyTag(text, options: options)
-            if wrapped != text {
+            let wrapped = constructProsodyTag(processed.text, options: options)
+            if wrapped != processed.text {
                 finalText = "<speak>\(wrapped)</speak>"
                 textType = "ssml"
             } else {
-                finalText = text
+                finalText = processed.text
                 textType = "text"
             }
         }
@@ -150,20 +151,21 @@ public final class PollyTTSClient: AbstractTTSClient, @unchecked Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
 
-        let isOriginallySSML = text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<speak>")
+        // Process SpeechMarkdown/SSML pipeline
+        let processed = processText(text, options: options, engine: .polly)
 
         let finalText: String
         let textType: String
-        if isOriginallySSML {
-            finalText = text
+        if processed.isSSML {
+            finalText = processed.text
             textType = "ssml"
         } else {
-            let wrapped = constructProsodyTag(text, options: options)
-            if wrapped != text {
+            let wrapped = constructProsodyTag(processed.text, options: options)
+            if wrapped != processed.text {
                 finalText = "<speak>\(wrapped)</speak>"
                 textType = "ssml"
             } else {
-                finalText = text
+                finalText = processed.text
                 textType = "text"
             }
         }
@@ -302,20 +304,21 @@ public final class PollyTTSClient: AbstractTTSClient, @unchecked Sendable {
             sampleRate = "24000"
         }
 
-        let isOriginallySSML = text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<speak>")
+        // Process SpeechMarkdown/SSML pipeline
+        let processed = processText(text, options: options, engine: .polly)
 
         let finalText: String
         let textType: String
-        if isOriginallySSML {
-            finalText = text
+        if processed.isSSML {
+            finalText = processed.text
             textType = "ssml"
         } else {
-            let wrapped = constructProsodyTag(text, options: options)
-            if wrapped != text {
+            let wrapped = constructProsodyTag(processed.text, options: options)
+            if wrapped != processed.text {
                 finalText = "<speak>\(wrapped)</speak>"
                 textType = "ssml"
             } else {
-                finalText = text
+                finalText = processed.text
                 textType = "text"
             }
         }

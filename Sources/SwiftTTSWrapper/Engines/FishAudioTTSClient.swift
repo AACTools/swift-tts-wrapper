@@ -34,6 +34,9 @@ public final class FishAudioTTSClient: AbstractTTSClient, @unchecked Sendable {
     }
 
     public override func synthToBytes(_ text: String, options: SpeakOptions?) async throws -> Data {
+        let processed = processText(text, options: options, engine: .fishaudio)
+        let text = processed.text
+
         let key = credentials["apiKey"] ?? ProcessInfo.processInfo.environment["FISH_AUDIO_API_KEY"]
         guard let apiKey = key, !apiKey.isEmpty else {
             throw NSError(domain: "FishAudioTTSClient", code: 401, userInfo: [NSLocalizedDescriptionKey: "Missing Fish Audio apiKey"])
@@ -70,6 +73,9 @@ public final class FishAudioTTSClient: AbstractTTSClient, @unchecked Sendable {
     }
 
     public override func synthToBytestream(_ text: String, options: SpeakOptions?) async throws -> AsyncThrowingStream<Data, Error> {
+        let processed = processText(text, options: options, engine: .fishaudio)
+        let text = processed.text
+
         let key = credentials["apiKey"] ?? ProcessInfo.processInfo.environment["FISH_AUDIO_API_KEY"]
         guard let apiKey = key, !apiKey.isEmpty else {
             throw NSError(domain: "FishAudioTTSClient", code: 401, userInfo: [NSLocalizedDescriptionKey: "Missing Fish Audio apiKey"])
@@ -132,7 +138,8 @@ public final class FishAudioTTSClient: AbstractTTSClient, @unchecked Sendable {
         switch input {
         case .text(let text):
             let data = try await synthToBytes(text, options: options)
-            let boundaries = options?.useWordBoundary == true ? WordTimingEstimator.estimate(text: text) : []
+            let plainText = AbstractTTSClient.looksLikeMarkdown(text) ? (AbstractTTSClient.convertMarkdownToText(text) ?? text) : text
+            let boundaries = options?.useWordBoundary == true ? WordTimingEstimator.estimate(text: plainText) : []
             try player.play(data: data, boundaries: boundaries)
 
         case .file(let url):

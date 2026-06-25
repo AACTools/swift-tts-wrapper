@@ -401,5 +401,121 @@ final class SwiftTTSWrapperTests: XCTestCase {
         XCTAssertEqual(SystemTTSClient.iso639_3(from: "fr-FR"), "fra")
         XCTAssertEqual(SystemTTSClient.iso639_3(from: "unknown-lang"), "unknown")
     }
+
+    // MARK: - SpeechMarkdown & SSML Tests
+
+    func testStripSSML() {
+        XCTAssertEqual(AbstractTTSClient.stripSSML("<speak>Hello world</speak>"), "Hello world")
+        XCTAssertEqual(AbstractTTSClient.stripSSML("<speak><prosody rate=\"fast\">Hello</prosody> world</speak>"), "Hello world")
+        XCTAssertEqual(AbstractTTSClient.stripSSML("<speak>Hello<break time=\"500ms\"/>world</speak>"), "Hello world")
+        XCTAssertEqual(AbstractTTSClient.stripSSML("<speak><emphasis>Hello</emphasis> world</speak>"), "Hello world")
+        XCTAssertEqual(AbstractTTSClient.stripSSML("Plain text"), "Plain text")
+        XCTAssertEqual(AbstractTTSClient.stripSSML(""), "")
+        // XML entity unescaping
+        XCTAssertEqual(AbstractTTSClient.stripSSML("<speak>A &amp; B</speak>"), "A & B")
+        XCTAssertEqual(AbstractTTSClient.stripSSML("<speak>&lt;tag&gt;</speak>"), "<tag>")
+    }
+
+    func testIsSSML() {
+        XCTAssertTrue(AbstractTTSClient.isSSML("<speak>Hello</speak>"))
+        XCTAssertTrue(AbstractTTSClient.isSSML("  <speak version='1.0'>Hello</speak>  "))
+        XCTAssertTrue(AbstractTTSClient.isSSML("<SPEAK>Hello</SPEAK>"))
+        XCTAssertFalse(AbstractTTSClient.isSSML("Hello world"))
+        XCTAssertFalse(AbstractTTSClient.isSSML("[rate:fast]Hello[/rate]"))
+    }
+
+    func testLooksLikeMarkdown() {
+        XCTAssertTrue(AbstractTTSClient.looksLikeMarkdown("(Hello)[rate:\"fast\"]"))
+        XCTAssertTrue(AbstractTTSClient.looksLikeMarkdown("Sample [2s] text"))
+        XCTAssertTrue(AbstractTTSClient.looksLikeMarkdown("++strong++"))
+        XCTAssertTrue(AbstractTTSClient.looksLikeMarkdown("~word~"))
+        XCTAssertFalse(AbstractTTSClient.looksLikeMarkdown("Hello world"))
+        XCTAssertFalse(AbstractTTSClient.looksLikeMarkdown("<speak>Hello</speak>"))
+    }
+
+    func testConvertMarkdownToSSML() {
+        let markdown = "(Hello)[rate:\"fast\"]"
+        let ssml = AbstractTTSClient.convertMarkdownToSSML(markdown, platform: "microsoft-azure")
+        XCTAssertNotNil(ssml)
+        XCTAssertTrue(ssml!.lowercased().contains("<speak"))
+        XCTAssertTrue(ssml!.contains("Hello"))
+    }
+
+    func testConvertMarkdownToText() {
+        let markdown = "(Hello)[rate:\"fast\"] world"
+        let text = AbstractTTSClient.convertMarkdownToText(markdown)
+        XCTAssertNotNil(text)
+        XCTAssertTrue(text!.contains("Hello"))
+        XCTAssertTrue(text!.contains("world"))
+        XCTAssertFalse(text!.contains("[rate"))
+    }
+
+    func testProcessTextPlainPassthrough() {
+        let client = SystemTTSClient()
+        let result = client.processText("Hello world", options: nil, engine: .system)
+        XCTAssertFalse(result.isSSML)
+        XCTAssertEqual(result.text, "Hello world")
+    }
+
+    func testProcessTextRawSSML() {
+        let client = SystemTTSClient()
+        let ssml = "<speak version='1.0'>Hello</speak>"
+        let result = client.processText(ssml, options: SpeakOptions(rawSSML: true), engine: .system)
+        XCTAssertTrue(result.isSSML)
+        XCTAssertEqual(result.text, ssml)
+    }
+
+    func testProcessTextAutoDetectMarkdown() {
+        let client = SystemTTSClient()
+        let markdown = "(Hello)[rate:\"fast\"]"
+        let result = client.processText(markdown, options: nil, engine: .system)
+        XCTAssertTrue(result.isSSML)
+        XCTAssertTrue(result.text.lowercased().contains("<speak"))
+    }
+
+    func testProcessTextMarkdownForNonSSMLEngine() {
+        let client = OpenAITTSClient()
+        let markdown = "(Hello)[rate:\"fast\"]"
+        let result = client.processText(markdown, options: nil, engine: .openai)
+        XCTAssertFalse(result.isSSML)
+        XCTAssertTrue(result.text.contains("Hello"))
+        XCTAssertFalse(result.text.contains("[rate"))
+    }
+
+    func testProcessTextExplicitUseSpeechMarkdown() {
+        let client = AzureTTSClient()
+        let markdown = "(Hello)[rate:\"fast\"]"
+        let result = client.processText(markdown, options: SpeakOptions(useSpeechMarkdown: true), engine: .azure)
+        XCTAssertTrue(result.isSSML)
+        XCTAssertTrue(result.text.lowercased().contains("<speak"))
+    }
+
+    func testProcessTextAlreadySSML() {
+        let client = SystemTTSClient()
+        let ssml = "<speak>Hello</speak>"
+        let result = client.processText(ssml, options: nil, engine: .system)
+        XCTAssertTrue(result.isSSML)
+        XCTAssertEqual(result.text, ssml)
+    }
+
+    func testSupportsSSMLProperty() {
+        XCTAssertTrue(TTSEngine.system.supportsSSML)
+        XCTAssertTrue(TTSEngine.azure.supportsSSML)
+        XCTAssertTrue(TTSEngine.google.supportsSSML)
+        XCTAssertTrue(TTSEngine.polly.supportsSSML)
+        XCTAssertTrue(TTSEngine.watson.supportsSSML)
+        XCTAssertFalse(TTSEngine.openai.supportsSSML)
+        XCTAssertFalse(TTSEngine.elevenlabs.supportsSSML)
+        XCTAssertFalse(TTSEngine.sherpaonnx.supportsSSML)
+    }
+
+    func testSpeechMarkdownPlatformStrings() {
+        XCTAssertEqual(TTSEngine.system.speechMarkdownPlatform, "apple")
+        XCTAssertEqual(TTSEngine.azure.speechMarkdownPlatform, "microsoft-azure")
+        XCTAssertEqual(TTSEngine.google.speechMarkdownPlatform, "google-assistant")
+        XCTAssertEqual(TTSEngine.polly.speechMarkdownPlatform, "amazon-polly")
+        XCTAssertEqual(TTSEngine.watson.speechMarkdownPlatform, "ibm-watson")
+        XCTAssertEqual(TTSEngine.openai.speechMarkdownPlatform, "w3c")
+    }
 }
 

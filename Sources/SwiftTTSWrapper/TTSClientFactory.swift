@@ -36,6 +36,14 @@ public enum TTSEngine: String, CaseIterable {
         default: return "w3c"
         }
     }
+
+    /// Whether this engine can consume SSML markup directly.
+    public var supportsSSML: Bool {
+        switch self {
+        case .system, .azure, .google, .polly, .watson: return true
+        default: return false
+        }
+    }
 }
 
 /// Factory class to dynamically instantiate TTS Clients.

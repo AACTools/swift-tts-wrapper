@@ -34,6 +34,9 @@ public final class ElevenLabsTTSClient: AbstractTTSClient, @unchecked Sendable {
     }
 
     public override func synthToBytes(_ text: String, options: SpeakOptions?) async throws -> Data {
+        let processed = processText(text, options: options, engine: .elevenlabs)
+        let text = processed.text
+
         let apiKey = credentials["apiKey"] ?? ProcessInfo.processInfo.environment["ELEVENLABS_API_KEY"]
         guard let key = apiKey, !key.isEmpty else {
             throw NSError(domain: "ElevenLabsTTSClient", code: 401, userInfo: [NSLocalizedDescriptionKey: "Missing ElevenLabs API Key"])
@@ -118,6 +121,9 @@ public final class ElevenLabsTTSClient: AbstractTTSClient, @unchecked Sendable {
     }
 
     public override func synthToBytestream(_ text: String, options: SpeakOptions?) async throws -> AsyncThrowingStream<Data, Error> {
+        let processed = processText(text, options: options, engine: .elevenlabs)
+        let text = processed.text
+
         let useTimestamps = options?.useWordBoundary == true
         if useTimestamps {
             let data = try await synthToBytes(text, options: options)

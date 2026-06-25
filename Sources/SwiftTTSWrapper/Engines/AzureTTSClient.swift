@@ -36,15 +36,18 @@ public final class AzureTTSClient: AbstractTTSClient, @unchecked Sendable {
         let selectedVoice = options?.voice ?? voice
         let langCode = String(selectedVoice.prefix(5))
 
+        // Process SpeechMarkdown/SSML pipeline
+        let processed = processText(text, options: options, engine: .azure)
+
         let content: String
-        if options?.rawSSML == true {
-            if let body = Self.extractSSMLBody(text) {
+        if processed.isSSML {
+            if let body = Self.extractSSMLBody(processed.text) {
                 content = body
             } else {
-                return text
+                return processed.text
             }
         } else {
-            var escapedText = text
+            var escapedText = processed.text
             escapedText = escapedText.replacingOccurrences(of: "&", with: "&amp;")
             escapedText = escapedText.replacingOccurrences(of: "<", with: "&lt;")
             escapedText = escapedText.replacingOccurrences(of: ">", with: "&gt;")

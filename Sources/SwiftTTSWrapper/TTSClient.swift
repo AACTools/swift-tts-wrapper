@@ -1,4 +1,5 @@
 import Foundation
+import SpeechMarkdown
 
 /// Unified interface for all Text-to-Speech clients.
 public protocol TTSClient: AnyObject {
@@ -123,5 +124,96 @@ open class AbstractTTSClient: NSObject, TTSClient, @unchecked Sendable {
         }
         if attrs.isEmpty { return text }
         return "<prosody \(attrs.joined(separator: " "))>\(text)</prosody>"
+    }
+
+    // MARK: - SpeechMarkdown & SSML Helpers
+
+    /// Result of processing input text through the markdown/SSML pipeline.
+    public struct ProcessedText {
+        /// The processed text (may be SSML or plain text)
+        public let text: String
+        /// Whether the processed text is SSML
+        public let isSSML: Bool
+    }
+
+    private static let markdownParser = SpeechMarkdownParser()
+
+    /// Detects whether the string looks like SpeechMarkdown.
+    public static func looksLikeMarkdown(_ text: String) -> Bool {
+        return markdownParser.isSpeechMarkdown(input: text)
+    }
+
+    /// Detects whether the string is already SSML (starts with `<speak`).
+    public static func isSSML(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.lowercased().hasPrefix("<speak")
+    }
+
+    /// Converts SpeechMarkdown to SSML for the given platform.
+    public static func convertMarkdownToSSML(_ text: String, platform: String) -> String? {
+        return try? markdownParser.toSsml(input: text, platform: platform)
+    }
+
+    /// Converts SpeechMarkdown to plain text (strips all markup).
+    public static func convertMarkdownToText(_ text: String) -> String? {
+        return try? markdownParser.toText(input: text)
+    }
+
+    /// Strips all SSML tags and unescapes XML entities, returning plain text.
+    public static func stripSSML(_ ssml: String) -> String {
+        var result = ssml
+        // Replace self-closing tags (break, mark, etc.) with space to avoid fusing words
+        result = result.replacingOccurrences(of: #"<[^>/]+/>"#, with: " ", options: .regularExpression)
+        // Remove all remaining opening/closing tags
+        result = result.replacingOccurrences(of: #"</?[a-zA-Z][^>]*>"#, with: "", options: .regularExpression)
+        // Unescape XML entities
+        result = result.replacingOccurrences(of: "&amp;apos;", with: "'")
+        result = result.replacingOccurrences(of: "&amp;quot;", with: "\"")
+        result = result.replacingOccurrences(of: "&amp;", with: "&")
+        result = result.replacingOccurrences(of: "&lt;", with: "<")
+        result = result.replacingOccurrences(of: "&gt;", with: ">")
+        result = result.replacingOccurrences(of: "&quot;", with: "\"")
+        result = result.replacingOccurrences(of: "&apos;", with: "'")
+        // Collapse whitespace
+        result = result.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Processes input text through the SpeechMarkdown/SSML pipeline.
+    ///
+    /// Handles auto-detection of SpeechMarkdown, conversion to SSML (for SSML-capable engines)
+    /// or plain text (for non-SSML engines), and raw SSML passthrough.
+    ///
+    /// - Parameters:
+    ///   - text: The input text
+    ///   - options: Speak options (may be nil)
+    ///   - engine: The engine that will process the text
+    /// - Returns: Processed text and whether it's SSML
+    public func processText(_ text: String, options: SpeakOptions?, engine: TTSEngine) -> ProcessedText {
+        // Raw SSML passthrough
+        if options?.rawSSML == true {
+            return ProcessedText(text: text, isSSML: true)
+        }
+
+        // Already SSML
+        if Self.isSSML(text) {
+            return ProcessedText(text: text, isSSML: true)
+        }
+
+        // SpeechMarkdown conversion (explicit or auto-detected)
+        let shouldConvert = options?.useSpeechMarkdown == true || Self.looksLikeMarkdown(text)
+        if shouldConvert {
+            if engine.supportsSSML {
+                if let ssml = Self.convertMarkdownToSSML(text, platform: engine.speechMarkdownPlatform) {
+                    return ProcessedText(text: ssml, isSSML: true)
+                }
+            } else {
+                if let plainText = Self.convertMarkdownToText(text) {
+                    return ProcessedText(text: plainText, isSSML: false)
+                }
+            }
+        }
+
+        return ProcessedText(text: text, isSSML: false)
     }
 }

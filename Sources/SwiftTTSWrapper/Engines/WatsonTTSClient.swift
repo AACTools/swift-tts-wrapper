@@ -126,6 +126,9 @@ public final class WatsonTTSClient: AbstractTTSClient, @unchecked Sendable {
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.addValue("audio/wav", forHTTPHeaderField: "Accept")
 
+        // Process SpeechMarkdown/SSML pipeline
+        let processed = processText(text, options: options, engine: .watson)
+
         var attrs: [String] = []
         if let rate = options?.rate, rate != .medium {
             attrs.append("rate=\"\(rate.rawValue)\"")
@@ -141,14 +144,20 @@ public final class WatsonTTSClient: AbstractTTSClient, @unchecked Sendable {
         }
 
         let body: [String: Any]
-        if attrs.isEmpty {
+        if processed.isSSML {
             body = [
-                "text": text,
+                "text": processed.text,
+                "voice": selectedVoice,
+                "accept": "audio/wav"
+            ]
+        } else if attrs.isEmpty {
+            body = [
+                "text": processed.text,
                 "voice": selectedVoice,
                 "accept": "audio/wav"
             ]
         } else {
-            let ssml = "<speak><prosody \(attrs.joined(separator: " "))>\(text)</prosody></speak>"
+            let ssml = "<speak><prosody \(attrs.joined(separator: " "))>\(processed.text)</prosody></speak>"
             body = [
                 "text": ssml,
                 "voice": selectedVoice,
@@ -189,6 +198,9 @@ public final class WatsonTTSClient: AbstractTTSClient, @unchecked Sendable {
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.addValue("audio/wav", forHTTPHeaderField: "Accept")
 
+        // Process SpeechMarkdown/SSML pipeline
+        let processed = processText(text, options: options, engine: .watson)
+
         var attrs: [String] = []
         if let rate = options?.rate, rate != .medium {
             attrs.append("rate=\"\(rate.rawValue)\"")
@@ -204,14 +216,20 @@ public final class WatsonTTSClient: AbstractTTSClient, @unchecked Sendable {
         }
 
         let body: [String: Any]
-        if attrs.isEmpty {
+        if processed.isSSML {
             body = [
-                "text": text,
+                "text": processed.text,
+                "voice": selectedVoice,
+                "accept": "audio/wav"
+            ]
+        } else if attrs.isEmpty {
+            body = [
+                "text": processed.text,
                 "voice": selectedVoice,
                 "accept": "audio/wav"
             ]
         } else {
-            let ssml = "<speak><prosody \(attrs.joined(separator: " "))>\(text)</prosody></speak>"
+            let ssml = "<speak><prosody \(attrs.joined(separator: " "))>\(processed.text)</prosody></speak>"
             body = [
                 "text": ssml,
                 "voice": selectedVoice,

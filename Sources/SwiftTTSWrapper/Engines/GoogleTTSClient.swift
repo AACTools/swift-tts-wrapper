@@ -122,17 +122,21 @@ public final class GoogleTTSClient: AbstractTTSClient, @unchecked Sendable {
         let selectedLang = String(selectedVoice.prefix(5)) // e.g. "en-US"
         let selectedEncoding = options?.format?.rawValue.uppercased() ?? audioEncoding
 
+        // Process SpeechMarkdown/SSML pipeline
+        let processed = processText(text, options: options, engine: .google)
+
         var inputPayload: [String: Any] = [:]
         var wordsList: [String] = []
 
         if useWordBoundary {
-            let (markedSSML, words) = addWordTimingMarks(to: text)
+            let plainText = processed.isSSML ? AbstractTTSClient.stripSSML(processed.text) : processed.text
+            let (markedSSML, words) = addWordTimingMarks(to: plainText)
             inputPayload["ssml"] = markedSSML
             wordsList = words
-        } else if options?.rawSSML == true || text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<speak>") {
-            inputPayload["ssml"] = text
+        } else if processed.isSSML {
+            inputPayload["ssml"] = processed.text
         } else {
-            inputPayload["text"] = text
+            inputPayload["text"] = processed.text
         }
 
         var hasProsody = false

@@ -16,7 +16,8 @@ public final class SystemTTSClient: AbstractTTSClient, AVSpeechSynthesizerDelega
 
         switch input {
         case .text(let text):
-            let utterance = makeUtterance(text: text, options: options)
+            let processed = processText(text, options: options, engine: .system)
+            let utterance = makeUtterance(text: processed.text, isSSML: processed.isSSML, options: options)
             synthesizer.speak(utterance)
 
         case .file(let url):
@@ -47,7 +48,8 @@ public final class SystemTTSClient: AbstractTTSClient, AVSpeechSynthesizerDelega
     }
 
     public override func synthToBytes(_ text: String, options: SpeakOptions?) async throws -> Data {
-        let utterance = makeUtterance(text: text, options: options)
+        let processed = processText(text, options: options, engine: .system)
+        let utterance = makeUtterance(text: processed.text, isSSML: processed.isSSML, options: options)
 
         return try await withCheckedThrowingContinuation { continuation in
             var audioFile: AVAudioFile?
@@ -104,7 +106,8 @@ public final class SystemTTSClient: AbstractTTSClient, AVSpeechSynthesizerDelega
     }
 
     public override func synthToBytestream(_ text: String, options: SpeakOptions?) async throws -> AsyncThrowingStream<Data, Error> {
-        let utterance = makeUtterance(text: text, options: options)
+        let processed = processText(text, options: options, engine: .system)
+        let utterance = makeUtterance(text: processed.text, isSSML: processed.isSSML, options: options)
 
         let (stream, continuation) = AsyncThrowingStream<Data, Error>.makeStream()
 
@@ -220,16 +223,18 @@ public final class SystemTTSClient: AbstractTTSClient, AVSpeechSynthesizerDelega
     public func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, willSpeakRangeOfSpeechString characterRange: NSRange, utterance: AVSpeechUtterance) {
         let elapsedMs = Int((CACurrentMediaTime() - speechStartTime) * 1000)
         guard let range = Range(characterRange, in: utterance.speechString) else { return }
-        let word = String(utterance.speechString[range])
+        var word = String(utterance.speechString[range])
+        // Strip any SSML tags from boundary text
+        word = AbstractTTSClient.stripSSML(word)
         let estimatedDuration = characterRange.length * 80
         onBoundary?(WordBoundary(text: word, offset: elapsedMs, duration: estimatedDuration))
     }
 
     // MARK: - Private Helpers
 
-    private func makeUtterance(text: String, options: SpeakOptions?) -> AVSpeechUtterance {
+    private func makeUtterance(text: String, isSSML: Bool, options: SpeakOptions?) -> AVSpeechUtterance {
         let utterance: AVSpeechUtterance
-        if options?.rawSSML == true, let ssmlUtterance = AVSpeechUtterance(ssmlRepresentation: text) {
+        if isSSML, let ssmlUtterance = AVSpeechUtterance(ssmlRepresentation: text) {
             utterance = ssmlUtterance
         } else {
             utterance = AVSpeechUtterance(string: text)
